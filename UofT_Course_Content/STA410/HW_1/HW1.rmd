@@ -1,0 +1,252 @@
+---
+title: "STA410HW1"
+author: "Yuesheng Li 1002112064"
+date: "03/10/2019"
+header-includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+output: 
+  pdf_document:
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dtt)
+boat <- matrix(scan("boats.txt"), ncol=256, byrow = T)
+```
+
+```{r fun, echo=FALSE}
+# A function that plots a graph for M vs s with fixed epsilon 10^{-5}
+# invSigma is defined for positive real number, the interval length between cosecutive s_k
+Mplot <- function(invSigma, lambdaU, lambdaV) {
+  x <- c(1:100)/invSigma
+  x <- x[x>1]
+  y <- (lambdaU*(x-1)+ lambdaV*(x^2-1) - log(10^(-5)))/log(x)
+  plot(x, y, xlab='s', ylab='M')
+}
+
+# A function that evalute the bounded M we calculated mathematically before.
+# We take the ceiling if it is not an integer
+Mval <- function(invSigma, lambdaU, lambdaV) {
+  x <- c(1:100)/invSigma
+  x <- x[x>1]
+  y <- (lambdaU*(x-1)+ lambdaV*(x^2-1) - log(10^(-5)))/log(x)
+  ceiling(min(y))
+}
+
+# A function using FFT to evalute the distribution of X
+eval <- function(M, lambdaU, lambdaV){
+  # get sequence of s_k
+  s <- exp(-2*pi*1i*c(0: (M-1))/M)
+  # get sequence of g(s_k)
+  gs <- exp(lambdaU*(s-1)+ lambdaV*(s^2-1))
+  # Transform back
+  fs <- Re(fft(gs, inv=T)/M) 
+  fs <- list(x = c(0:(M-1)), prob =fs)
+  fs
+}
+```
+
+\section{DCT to Denoise an Image}
+\subsection{Matrix Transformation}
+\begin{proof}
+Let $\hat{Z} = A_mZA_m^T$, a $m \times n$ matrx be given.
+Let $\{A_n\}_n$ be a family of matrices satisfying $A^T_nA_n = D_n$, where $D_n$ is diagonal.Consider the following $:$
+\begin{equation} \label{eq1}
+\begin{split}
+D_m^{-1}A_m^T\hat{Z}A_nD_n^{-1} & = D_m^{-1}A_m^TA_mZA_m^TA_nD_n^{-1}\\
+& = D_m^{-1}(A_m^TA_m)Z(A_m^TA_n)D_n^{-1}\\
+& = D_m^{-1}D_mZD_nD_n^{-1}\\
+& = Z
+\end{split}
+\end{equation}
+\end{proof}
+
+\subsection{Threshold Transformation}
+
+The following function are the `r` function for threshold transformation, `denoiceH` is the hard-thresholding and `denoiceS` stands for soft-thresholding:
+```{r}
+denoiseH <- function(dctmat,quant) {
+  # Do the DCT on matrix
+  dctmatT <- mvdct(dctmat)
+  # if quant is missing, set it to the 0.8
+  if(missing(quant)) {lambda <- quantile(abs(dctmatT),0.8)}
+  else {lambda <- quantile(abs(dctmatT),quant)}
+  # hard-thresholding
+  a <- dctmatT[1,1]
+  dctmat1 <- ifelse(abs(dctmatT)>lambda,dctmatT,0)
+  dctmat1[1,1] <- a
+  # inverse DCT to obtain denoised image "clean"
+  clean <- mvdct(dctmat1,inverted=T)
+  clean <- ifelse(clean<0,0,clean)
+  clean <- ifelse(clean>1,1,clean)
+  clean
+}
+
+
+denoiseS <- function(dctmat,lambda) {
+  # Do the DCT on matrix
+  dctmatT <- mvdct(dctmat)
+  # if lambda is missing, set it to the 0.8 quantile of abs(dctmat)
+  if(missing(lambda)) lambda <- quantile(abs(dctmatT),0.8)
+  # soft-thresholding
+  a <- dctmatT[1,1]
+  dctmat1 <- sign(dctmatT)*pmax(abs(dctmatT)-lambda, 0)
+  dctmat1[1,1] <- a
+  # inverse DCT to obtain denoised image "clean"
+  clean <- mvdct(dctmat1,inverted=T)
+  clean <- ifelse(clean<0,0,clean)
+  clean <- ifelse(clean>1,1,clean)
+  clean
+}
+```
+
+\subsection{Denoise Methods and Results}
+
+First of all, take a look at the default image.
+```{r}
+image(boat, axes=F, col=grey(seq(0,1,length=256)))
+```
+Now, try the ones we have above with different threshold $\lambda$
+```{r}
+# Hard-threshold with quantile 0.4
+K <- denoiseH(boat, 0.4)
+image(K, axes=F, col=grey(seq(0,1,length=256)))
+
+# Soft-threshold with lambda = 12
+K <- denoiseS(boat, 12)
+image(K, axes=F, col=grey(seq(0,1,length=256)))
+```
+
+
+\section{Hermite Distribution and FFT}
+
+\subsection{PGF}
+
+\begin{proof}
+Let $U,V$ be independent Poisson r.v. with means $\lambda_u$ and $\lambda_v$.Define $X= U+2V$\\
+Let $g_U(s)$, $g_V(s)$ and $g_X(s)$ denote the pgf of $U, V, X$ respectively.\\
+
+\begin{equation} \label{probU}
+P(U = k)= \frac{\lambda_u^ke^{-\lambda}}{k!}
+\end{equation} 
+
+\begin{equation} \label{probV}
+P(V = k)= \frac{\lambda_v^ke^{-\lambda}}{k!}
+\end{equation}
+Now, using equation \ref{probU} and \ref{probV} together with taylor expansion of $e$ 
+\begin{equation} \label{pgfU}
+\begin{split}
+g_U(s) & = E(s^U) \\
+& = \Sigma_{j=0}^\infty P(U=j)s^j\\
+& = \Sigma_{j=0}^\infty \frac{\lambda_u^je^{-\lambda_u}}{j!}s^j\\
+& = e^{-\lambda_u} \Sigma_{j=0}^\infty \frac{(\lambda_us)^j}{j!}\\
+& = e^{-\lambda_u}\cdot e^{\lambda_us} \\
+& = e^{\lambda_u(s-1)}
+\end{split}
+\end{equation}
+Similarly,
+\begin{equation} \label{pgfV}
+\begin{split}
+g_{2V}(s) & = E(s^{2V}) \\
+& = \Sigma_{j=0}^\infty P(V=j)s^{2j}\\
+& = \Sigma_{j=0}^\infty \frac{\lambda_v^je^{-\lambda_v}}{j!}s^{2j}\\
+& = e^{-\lambda_v} \Sigma_{j=0}^\infty \frac{(\lambda_vs^2)^j}{j!}\\
+& = e^{-\lambda_v}\cdot e^{\lambda_vs^2} \\
+& = e^{\lambda_v(s^2-1)}
+\end{split}
+\end{equation}
+Now we put everything together, and the fact that U and V are independent.
+\begin{equation} \label{pgfX}
+\begin{split}
+g_X(s) & = E(s^X)\\
+& = E(s^{(U+2V)}) \\
+& = E(s^U) \cdot E(s^{2V}) \\
+& = e^{\lambda_u(s-1)} \cdot e^{\lambda_v(s^2-1)}\\
+& = e^{\lambda_u(s-1) + \lambda_v(s^2-1)}
+\end{split}
+\end{equation}
+
+\end{proof}
+
+\subsection{Finding M}
+
+\begin{proof}
+Fix some $\epsilon > 0$. By \textit{Markov's Inequality}, we have\\
+\begin{equation} \label{Markov}
+P(X\geq M) = P(s^X\geq s^M) \leq \frac{E(s^X)}{s^M} = \frac{\exp[\lambda_u(s-1) + \lambda_v(s^2-1)]}{s^M}\\
+\end{equation}
+
+Now, to ensure $P(X\geq M) \leq \epsilon$, we can first determine a $M^*$ for each $s>1$ such that,
+\begin{align}
+& \epsilon = \frac{E(s^X)}{s^{M^*}} \geq P(X \geq M^*)  \notag \\
+& \epsilon = \frac{\exp(\lambda_u(s-1) + \lambda_v(s^2-1))}{s^{M^*}} \label{Mstar}\\
+\Rightarrow & s^{M^*} = \frac{\exp(\lambda_u(s-1) + \lambda_v(s^2-1))}{\epsilon} \notag \\
+\Rightarrow & M^*\ln(s) = \lambda_u(s-1) + \lambda_v(s^2-1) - \ln(\epsilon)  \notag \\
+\Rightarrow & M^* = \frac{\lambda_u(s-1) + \lambda_v(s^2-1) - \ln(\epsilon)}{\ln(s)} \label{Mstar2}
+\end{align}
+
+
+In fact, we can view $M^*$ as a function of $s$, ie. $M^*(s)$.
+Then we take 
+\begin{equation}
+M = \inf_{s>1} M^*(s) = \inf_{s>1} \frac{\lambda_u(s-1) + \lambda_v(s^2-1) - \ln(\epsilon)}{\ln(s)}
+\end{equation}
+
+To complete the proof, fix $\delta > 0$, there exists an $s > 1$ for $M^*(s)$ such that
+
+\begin{equation}
+M + \delta > M^*(s)
+\end{equation}
+Then we have:
+
+\begin{align}
+& \frac{\exp(\lambda_u(s-1) + \lambda_v(s^2-1))}{s^{M+\delta}} < \frac{\exp(\lambda_u(s-1) + \lambda_v(s^2-1))}{s^{M^*(x)}}\\
+\Rightarrow & \frac{\exp(\lambda_u(s-1) + \lambda_v(s^2-1))}{s^{M+\delta}} < \epsilon
+\end{align}
+
+Now shrink $\delta \rightarrow 0$, we can conclude that
+\begin{equation}
+P(X \geq M) \leq \frac{E(s^X)}{s^{M}} = \frac{\exp(\lambda_u(s-1) + \lambda_v(s^2-1))}{s^{M}} \leq \epsilon
+\end{equation}
+
+
+
+\end{proof}
+
+\subsection{FFT for Distribution}
+
+
+Before we determine value of M, we first make some plots of $M vs. s$ with fixed $\epsilon, \lambda_u, \lambda_v$
+
+```{r 2ia}
+Mplot(20, 1, 5)
+```
+We can observe that the min of $M$ is reached when $s$ is approxmately 2
+Now we evalute the value $M$ and do FFT.
+
+```{r 2ib}
+M <- Mval(20, 1, 5)
+M
+p1 <- eval(M, 1, 5)
+p1
+```
+To clearly illistrate this result, let's have a plot.
+```{r 2ic}
+plot(p1$x, p1$prob, type='h', lwd=5,xlab= 'Values', 
+     ylab = 'Probabilities', main ='Approximation to a Hermite distribution 1')
+```
+
+Now we do the same thing for part $(ii)$
+```{r 2ii}
+Mplot(20, 0.1, 2)
+M <- Mval(20, 0.1, 2)
+M
+p2 <- eval(M, 0.1, 2)
+p2
+plot(p2$x, p2$prob, type='h', lwd=5, xlab= 'Values', 
+     ylab = 'Probabilities', main ='Approximation to a Hermite distribution 2')
+```
+
